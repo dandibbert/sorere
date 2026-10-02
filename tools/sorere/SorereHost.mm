@@ -6,6 +6,8 @@
 #import <dns_sd.h>
 
 #include <arpa/inet.h>
+#include <algorithm>
+#include <climits>
 #include <atomic>
 #include <cmath>
 #include <csignal>
