@@ -11,13 +11,14 @@ The MVP deliberately avoids the public radio/relay product flow.
 ```text
 iPhone microphone
   -> 48 kHz PCM / OSTP
-  -> LAN multicast 239.69.0.1:5004
+  -> Bonjour discovers the Mac
+  -> direct LAN UDP to Mac:5004
   -> Sorere Host (solunad on macOS)
   -> BlackHole 2ch
   -> any macOS app that accepts BlackHole 2ch as microphone input
 ```
 
-No Soluna account or WAN relay is required for this path.
+No Soluna account, WAN relay, or iOS multicast entitlement is required for this path. Bonjour is used only to discover the Mac; microphone audio itself is unicast UDP.
 
 ## Requirements
 
@@ -81,14 +82,14 @@ To remove it, run `UninstallSorereHost.command`.
 Before adding menu-bar polish, validate these four things on real hardware:
 
 1. **Audio path:** iPhone speech reaches BlackHole 2ch reliably.
-2. **Latency:** speech input latency is acceptable for calls/dictation.
+2. **Latency:** speech input latency is acceptable for calls/dictation (the Mac host uses the ~20 ms default receive buffer rather than the 100 ms Wi-Fi profile).
 3. **Background:** lock the iPhone for at least 10 minutes while transmitting.
 4. **Recovery:** toggle Wi-Fi off and back on and verify transmission resumes or can be restarted cleanly.
 
 ## Current limitations
 
 - LAN-only by design.
-- The first MVP uses multicast instead of pairing to a single Mac.
+- The first MVP automatically selects the first Sorere/OpenSonic host found by Bonjour; a manual Mac IP fallback is available.
 - The iPhone app must have microphone permission.
 - iOS may interrupt the audio session for phone calls, Siri, route changes, or another app taking exclusive audio.
 - The Mac host expects a CoreAudio output device named exactly `BlackHole 2ch`.
