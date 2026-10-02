@@ -130,5 +130,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: SorereMic-unsigned-ipa
-          path: dist/SorereMic-unsigned.ipa
+          path: |
+            dist/SorereMic-unsigned.ipa
+            LICENSE
           if-no-files-found: error
