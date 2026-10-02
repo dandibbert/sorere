@@ -26,9 +26,9 @@ if ! printf '%s\n' "$DEVICES" | grep -Fq "$DEVICE"; then
 fi
 
 echo "Sorere Host"
-echo "  Input : iPhone over LAN multicast 239.69.0.1:5004"
+echo "  Input : iPhone over direct LAN UDP on port 5004"
 echo "  Output: $DEVICE"
-echo "  Mode  : jam / Wi-Fi latency profile"
+echo "  Mode  : jam / ~20 ms receive buffer"
 echo
 echo "Leave this window open while using the iPhone as a microphone."
 echo "Press Ctrl-C to stop."
@@ -42,6 +42,5 @@ exec "$BIN" \
   --channels 2 \
   --codec pcm \
   --mode jam \
-  --wifi-latency \
   --no-relay \
   --no-auto-tune
