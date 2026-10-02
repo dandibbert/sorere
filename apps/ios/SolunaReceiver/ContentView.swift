@@ -3,7 +3,7 @@
 //  Sorere Mic
 //
 //  Purpose-built iPhone -> Mac microphone UI.
-//  Transport remains OpenSonic OSTP multicast on the local network.
+//  The Mac is discovered with Bonjour; microphone audio is sent by unicast UDP.
 //
 
 import SwiftUI
@@ -11,19 +11,23 @@ import AVFoundation
 
 struct ContentView: View {
     @StateObject private var receiver = AudioReceiver()
+    @StateObject private var deviceBrowser = DeviceBrowser()
 
     @AppStorage("sorere.autoStartMic") private var autoStartMic = false
+    @AppStorage("sorere.lastMacHost") private var lastMacHost = ""
+
+    @State private var macHost: String?
+    @State private var manualHost = ""
     @State private var didAutoStart = false
     @State private var permissionDenied = false
     @State private var showDetails = false
 
-    private let multicastGroup = "239.69.0.1"
-    private let multicastPort: UInt16 = 5004
+    private let audioPort: UInt16 = 5004
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 28) {
-                Spacer(minLength: 24)
+            VStack(spacing: 26) {
+                Spacer(minLength: 20)
 
                 VStack(spacing: 8) {
                     Image(systemName: "iphone.radiowaves.left.and.right")
@@ -48,7 +52,7 @@ struct ContentView: View {
                             .frame(width: 184, height: 184)
 
                         Circle()
-                            .fill(receiver.isMicTransmitting ? Color.red : Color.accentColor)
+                            .fill(receiver.isMicTransmitting ? Color.red : (macHost == nil ? Color.secondary : Color.accentColor))
                             .frame(width: 136, height: 136)
                             .shadow(radius: receiver.isMicTransmitting ? 18 : 8)
 
@@ -58,10 +62,12 @@ struct ContentView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(macHost == nil && !receiver.isMicTransmitting)
                 .accessibilityLabel(receiver.isMicTransmitting ? "Stop microphone" : "Start microphone")
 
                 VStack(spacing: 10) {
-                    Text(receiver.isMicTransmitting ? "MICROPHONE ON" : "Tap to start")
+                    Text(receiver.isMicTransmitting ? "MICROPHONE ON" :
+                            (macHost == nil ? "Waiting for Mac" : "Tap to start"))
                         .font(.headline)
                         .foregroundStyle(receiver.isMicTransmitting ? .red : .secondary)
 
@@ -81,19 +87,37 @@ struct ContentView: View {
 
                 Spacer()
 
-                Toggle("Start microphone when app opens", isOn: $autoStartMic)
+                Toggle("Start microphone when Mac is found", isOn: $autoStartMic)
                     .font(.subheadline)
 
                 DisclosureGroup("Connection details", isExpanded: $showDetails) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         detailRow("Input", inputRouteName)
-                        detailRow("Transport", "LAN multicast · PCM · 48 kHz")
-                        detailRow("Destination", "\(multicastGroup):\(multicastPort)")
+                        detailRow("Transport", "LAN unicast · PCM · 48 kHz")
+                        detailRow("Mac", macHost ?? "Searching…")
+                        detailRow("Destination", macHost.map { "\($0):\(audioPort)" } ?? "—")
                         detailRow("Packets sent", "\(receiver.txPacketsSent)")
-                        Text("The Mac host listens on the same LAN and writes directly to BlackHole 2ch.")
+
+                        Divider()
+
+                        Text("Manual Mac IP")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                        HStack {
+                            TextField("192.168.1.10", text: $manualHost)
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            Button("Use") {
+                                useManualHost()
+                            }
+                            .disabled(manualHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        Text("Sorere Host advertises itself over Bonjour. Audio itself is direct UDP to the Mac, so no multicast entitlement or public relay is needed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.top, 8)
                 }
@@ -105,39 +129,71 @@ struct ContentView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
-            configureTransport()
             refreshPermissionState()
 
-            guard autoStartMic, !didAutoStart else { return }
-            didAutoStart = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if !receiver.isMicTransmitting {
-                    toggleMic()
-                }
+            if !lastMacHost.isEmpty {
+                setMacHost(lastMacHost)
             }
+
+            deviceBrowser.startScanning()
+            maybeAutoStart()
+        }
+        .onDisappear {
+            deviceBrowser.stopScanning()
+        }
+        .onChange(of: deviceBrowser.devices) { devices in
+            guard let device = devices.first else { return }
+            setMacHost(device.host)
+            maybeAutoStart()
         }
     }
 
     private var statusCard: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(receiver.isMicTransmitting ? Color.green : Color.secondary.opacity(0.45))
-                .frame(width: 10, height: 10)
+            if macHost == nil {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Circle()
+                    .fill(receiver.isMicTransmitting ? Color.green : Color.blue)
+                    .frame(width: 10, height: 10)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(receiver.isMicTransmitting ? "Streaming to Mac" : "Ready")
+                Text(statusTitle)
                     .font(.headline)
-                Text(receiver.isMicTransmitting
-                     ? "Keep this app running; locking the iPhone is supported."
-                     : "Start Sorere Host on the Mac, then tap the microphone.")
+                Text(statusSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
+
+            if macHost == nil {
+                Button("Scan") {
+                    deviceBrowser.startScanning()
+                }
+                .font(.caption)
+            }
         }
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var statusTitle: String {
+        if receiver.isMicTransmitting { return "Streaming to Mac" }
+        if macHost != nil { return "Mac ready" }
+        return "Finding Sorere Host…"
+    }
+
+    private var statusSubtitle: String {
+        if receiver.isMicTransmitting {
+            return "Direct LAN audio · background/lock-screen capable"
+        }
+        if let macHost {
+            return "Found \(macHost)"
+        }
+        return "Start Sorere Host on the Mac and keep both devices on the same LAN."
     }
 
     private var levelMeter: some View {
@@ -168,21 +224,44 @@ struct ContentView: View {
         AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "iPhone microphone"
     }
 
-    private func configureTransport() {
-        receiver.multicastGroup = multicastGroup
-        receiver.port = multicastPort
+    private func setMacHost(_ host: String) {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        macHost = trimmed
+        lastMacHost = trimmed
+        receiver.multicastGroup = trimmed   // OpenSonic TX accepts unicast IPv4 here too.
+        receiver.port = audioPort
         receiver.channels = 2
         receiver.micGlobal = false
+    }
+
+    private func useManualHost() {
+        setMacHost(manualHost)
+        manualHost = ""
+        maybeAutoStart()
     }
 
     private func refreshPermissionState() {
         permissionDenied = AVAudioSession.sharedInstance().recordPermission == .denied
     }
 
+    private func maybeAutoStart() {
+        guard autoStartMic, !didAutoStart, macHost != nil, !receiver.isMicTransmitting else { return }
+        didAutoStart = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            toggleMic()
+        }
+    }
+
     private func toggleMic() {
-        configureTransport()
         refreshPermissionState()
         guard !permissionDenied else { return }
+
+        if !receiver.isMicTransmitting {
+            guard let macHost else { return }
+            setMacHost(macHost)
+        }
+
         receiver.toggleMic()
 
         // Permission callbacks are asynchronous; refresh after the system sheet settles.
