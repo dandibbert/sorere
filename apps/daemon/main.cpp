@@ -4227,7 +4227,7 @@ static int run_rx(DaemonConfig cfg) {
     // Audio callback: ring buffer (or PlayoutBuffer) → convert → playback
     static uint64_t sine_phase = 0;
     bool sine_test = (std::getenv("SOLUNA_SINE_TEST") != nullptr);
-    audio->start([&](float* buffer, uint32_t frame_count) {
+    bool audio_started = audio->start([&](float* buffer, uint32_t frame_count) {
         size_t samples = frame_count * cfg.channels;
 
         if (sine_test) {
@@ -4539,6 +4539,13 @@ static int run_rx(DaemonConfig cfg) {
         }
 #endif
     });
+    if (!audio_started) {
+        fprintf(stderr, "Error: CoreAudio could not start output device '%s'\n",
+                cfg.audio_device.c_str());
+        return 1;
+    }
+    fprintf(stderr, "[SorereHost] CoreAudio output started: %s\n",
+            cfg.audio_device.c_str());
 
     // Create transport manager for optional DTLS
     TransportManager transport_mgr(cfg.security);
@@ -5045,7 +5052,7 @@ static int run_rx(DaemonConfig cfg) {
             g_buf_cap.store(ring.capacity());
         }
 
-        if (packets_received % 1000 == 0) {
+        if (packets_received % 200 == 0) {
             printf("%sRX: %lu pkts, seq_err:%lu, dup:%lu, fec:%lu, jitter:%.1fms, buf:%ums, ring:%zu/%zu",
                 isatty(STDOUT_FILENO) ? "\r" : "\n",
                 static_cast<unsigned long>(packets_received),
