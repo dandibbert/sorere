@@ -46,7 +46,6 @@ cat > "$PLIST" <<PLIST
     <string>pcm</string>
     <string>--mode</string>
     <string>jam</string>
-    <string>--wifi-latency</string>
     <string>--no-relay</string>
     <string>--no-auto-tune</string>
   </array>
