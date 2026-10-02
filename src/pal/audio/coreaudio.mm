@@ -254,31 +254,11 @@ private:
                                           sizeof(disable_io));
 #endif
         }
-#if TARGET_OS_MAC && !TARGET_OS_IPHONE
-        else if (explicit_output_device) {
-            // HALOutput playback: explicitly enable output bus 0 and disable
-            // input bus 1 so opening BlackHole never requests microphone access.
-            status = AudioUnitSetProperty(audio_unit_,
-                                          kAudioOutputUnitProperty_EnableIO,
-                                          kAudioUnitScope_Output,
-                                          0,
-                                          &enable_io,
-                                          sizeof(enable_io));
-            if (status != noErr) {
-                fprintf(stderr, "CoreAudio: Failed to enable explicit output: %d\n", (int)status);
-                AudioComponentInstanceDispose(audio_unit_);
-                audio_unit_ = nullptr;
-                return false;
-            }
-            AudioUnitSetProperty(audio_unit_,
-                                 kAudioOutputUnitProperty_EnableIO,
-                                 kAudioUnitScope_Input,
-                                 1,
-                                 &disable_io,
-                                 sizeof(disable_io));
-        }
-#endif
-        // DefaultOutput playback and iOS RemoteIO need no extra EnableIO setup.
+        // Explicit HALOutput playback uses the same minimal setup as the
+        // proven OutputSink path in the macOS app: select the device, set the
+        // client format, install the render callback, then start.  Do not
+        // toggle HAL input/output buses here; doing so is unnecessary for an
+        // output-only device and can interfere with virtual loopback devices.
 
 #if TARGET_OS_MAC && !TARGET_OS_IPHONE
         if (explicit_output_device) {
@@ -294,19 +274,6 @@ private:
                 AudioComponentInstanceDispose(audio_unit_);
                 audio_unit_ = nullptr;
                 return false;
-            }
-
-            // Keep the virtual device on the stream sample rate where possible.
-            Float64 desired_rate = static_cast<Float64>(config.sample_rate);
-            AudioObjectPropertyAddress rate_addr = {
-                kAudioDevicePropertyNominalSampleRate,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-            OSStatus rate_status = AudioObjectSetPropertyData(
-                dev_id, &rate_addr, 0, nullptr, sizeof(desired_rate), &desired_rate);
-            if (rate_status != noErr) {
-                fprintf(stderr, "CoreAudio: output sample-rate set warning: %d\n", (int)rate_status);
             }
 
             status = AudioUnitSetProperty(audio_unit_,
@@ -332,7 +299,7 @@ private:
             AudioObjectSetPropertyData(dev_id, &buf_addr, 0, nullptr,
                                        sizeof(hw_buf), &hw_buf);
 
-            fprintf(stderr, "CoreAudio: explicit output -> '%s' (device %u)\n",
+            fprintf(stderr, "[SorereHost] BlackHole route selected: '%s' (device %u)\n",
                     device_id.c_str(), (unsigned)dev_id);
         }
 
@@ -426,7 +393,7 @@ private:
             } else {
                 fprintf(stderr, "CoreAudio: WARNING — dev_id=0, no explicit device set (will use system default input)\n");
             }
-        } else {
+        } else if (!explicit_output_device) {
             fprintf(stderr, "CoreAudio: Using DefaultOutput (system default playback device)\n");
         }
 #else
