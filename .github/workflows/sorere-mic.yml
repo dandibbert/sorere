@@ -27,23 +27,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install build tools
-        run: brew install cmake ninja
-
-      - name: Configure
+      - name: Build minimal Sorere host
         run: |
-          cmake -B build-mac -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DSOLUNA_BUILD_TESTS=OFF
-
-      - name: Build solunad
-        run: cmake --build build-mac --target solunad --parallel
+          mkdir -p build-mac
+          clang++ \
+            -std=c++17 \
+            -O2 \
+            -arch arm64 \
+            -mmacosx-version-min=13.0 \
+            -x objective-c++ \
+            tools/sorere/SorereHost.mm \
+            -framework CoreAudio \
+            -framework CoreFoundation \
+            -o build-mac/sorere-host
 
       - name: Smoke test
         run: |
-          ./build-mac/solunad --help >/dev/null
+          test -x build-mac/sorere-host
+          file build-mac/sorere-host
           bash -n tools/sorere/SorereHost.command
+          bash -n tools/sorere/TestBlackHole.command
           bash -n tools/sorere/InstallSorereHost.command
           bash -n tools/sorere/UninstallSorereHost.command
 
@@ -51,10 +54,10 @@ jobs:
         run: |
           rm -rf dist/SorereHost
           mkdir -p dist/SorereHost
-          cp build-mac/solunad dist/SorereHost/
+          cp build-mac/sorere-host dist/SorereHost/
           cp tools/sorere/*.command dist/SorereHost/
           cp LICENSE dist/SorereHost/
-          chmod +x dist/SorereHost/solunad dist/SorereHost/*.command
+          chmod +x dist/SorereHost/sorere-host dist/SorereHost/*.command
           /usr/bin/ditto -c -k --keepParent dist/SorereHost dist/SorereHost-macos-arm64.zip
 
       - name: Upload Mac host
