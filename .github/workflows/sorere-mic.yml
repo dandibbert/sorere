@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sorere-mic-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-mac-host:
     name: Mac host (arm64)
