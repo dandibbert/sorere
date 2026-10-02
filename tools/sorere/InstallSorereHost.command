@@ -49,6 +49,11 @@ cat > "$PLIST" <<PLIST
     <string>--no-relay</string>
     <string>--no-auto-tune</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SORERE_HOST_MODE</key>
+    <string>1</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
