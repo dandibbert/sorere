@@ -39,7 +39,6 @@ jobs:
             tools/sorere/SorereHost.mm \
             -framework CoreAudio \
             -framework CoreFoundation \
-            -ldns_sd \
             -o build-mac/sorere-host
 
       - name: Smoke test
