@@ -9,6 +9,8 @@
 #include <climits>
 #include <atomic>
 #include <cmath>
+#include <chrono>
+#include <cstdlib>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -407,9 +409,14 @@ int run_network(BlackHoleWriter& writer) {
     std::vector<float> samples;
     bool announced_packet = false;
     bool announced_signal = false;
+    const bool ui_mode = (std::getenv("SORERE_UI") != nullptr);
+    auto last_level_emit = std::chrono::steady_clock::now();
 
     while (gRunning.load()) {
-        ssize_t n = recv(fd, packet.data(), packet.size(), 0);
+        sockaddr_in source{};
+        socklen_t source_len = sizeof(source);
+        ssize_t n = recvfrom(fd, packet.data(), packet.size(), 0,
+                             reinterpret_cast<sockaddr*>(&source), &source_len);
         if (n <= 0) continue;
 
         size_t frames = 0;
@@ -418,7 +425,10 @@ int run_network(BlackHoleWriter& writer) {
             continue;
 
         if (!announced_packet) {
-            printf("iPhone connected\n");
+            char ip[INET_ADDRSTRLEN] = {};
+            inet_ntop(AF_INET, &source.sin_addr, ip, sizeof(ip));
+            if (ip[0] != '\0') printf("iPhone connected %s\n", ip);
+            else printf("iPhone connected\n");
             fflush(stdout);
             announced_packet = true;
         }
@@ -426,6 +436,15 @@ int run_network(BlackHoleWriter& writer) {
             printf("Audio flowing to BlackHole\n");
             fflush(stdout);
             announced_signal = true;
+        }
+
+        if (ui_mode) {
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_level_emit).count() >= 80) {
+                printf("LEVEL %.4f\n", peak);
+                fflush(stdout);
+                last_level_emit = now;
+            }
         }
 
         writer.ring().write(samples.data(), frames);
