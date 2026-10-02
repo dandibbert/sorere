@@ -254,11 +254,37 @@ private:
                                           sizeof(disable_io));
 #endif
         }
-        // Explicit HALOutput playback uses the same minimal setup as the
-        // proven OutputSink path in the macOS app: select the device, set the
-        // client format, install the render callback, then start.  Do not
-        // toggle HAL input/output buses here; doing so is unnecessary for an
-        // output-only device and can interfere with virtual loopback devices.
+#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+        else if (explicit_output_device) {
+            UInt32 enable_output = 1;
+            UInt32 disable_input = 0;
+            status = AudioUnitSetProperty(audio_unit_,
+                                          kAudioOutputUnitProperty_EnableIO,
+                                          kAudioUnitScope_Output,
+                                          0,
+                                          &enable_output,
+                                          sizeof(enable_output));
+            if (status != noErr) {
+                fprintf(stderr, "CoreAudio: Failed to enable explicit output: %d\n", (int)status);
+                AudioComponentInstanceDispose(audio_unit_);
+                audio_unit_ = nullptr;
+                return false;
+            }
+            status = AudioUnitSetProperty(audio_unit_,
+                                          kAudioOutputUnitProperty_EnableIO,
+                                          kAudioUnitScope_Input,
+                                          1,
+                                          &disable_input,
+                                          sizeof(disable_input));
+            if (status != noErr) {
+                fprintf(stderr, "CoreAudio: Failed to disable HAL input: %d\n", (int)status);
+                AudioComponentInstanceDispose(audio_unit_);
+                audio_unit_ = nullptr;
+                return false;
+            }
+        }
+#endif
+        // Explicit output setup above follows the standard AUHAL output path.
 
 #if TARGET_OS_MAC && !TARGET_OS_IPHONE
         if (explicit_output_device) {
