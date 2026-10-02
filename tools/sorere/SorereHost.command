@@ -6,35 +6,30 @@ BIN="$ROOT/solunad"
 DEVICE="BlackHole 2ch"
 
 if [[ ! -x "$BIN" ]]; then
-  echo "Sorere Host: solunad is missing next to this script."
+  echo "Sorere Host is incomplete: solunad is missing."
   exit 1
-fi
-
-if [[ "${1:-}" == "--list-devices" ]]; then
-  exec "$BIN" --list-devices
 fi
 
 DEVICES="$("$BIN" --list-devices 2>&1 || true)"
 if ! printf '%s\n' "$DEVICES" | grep -Fq "$DEVICE"; then
-  echo "Sorere Host: '$DEVICE' was not found."
-  echo
-  echo "Available audio devices:"
-  printf '%s\n' "$DEVICES"
-  echo
-  echo "Install BlackHole 2ch, then run SorereHost.command again."
+  echo "Sorere Host could not find BlackHole 2ch."
+  echo "Install BlackHole 2ch, then run this again."
   exit 2
 fi
 
 echo "Sorere Host"
-echo "  Input : iPhone over direct LAN UDP on port 5004"
-echo "  Output: $DEVICE"
-echo "  Mode  : jam / ~20 ms receive buffer"
+echo "BlackHole: found"
+echo "Waiting for iPhone…"
 echo
-echo "Leave this window open while using the iPhone as a microphone."
+echo "When the iPhone starts sending, this window will say:"
+echo "  iPhone audio received"
+echo
 echo "Press Ctrl-C to stop."
 echo
 
-exec "$BIN" \
+export SORERE_HOST_MODE=1
+
+"$BIN" \
   --rx \
   --device "$DEVICE" \
   --port 5004 \
@@ -43,4 +38,15 @@ exec "$BIN" \
   --codec pcm \
   --mode jam \
   --no-relay \
-  --no-auto-tune
+  --no-auto-tune \
+  2>&1 | awk '
+    /\[SorereHost\] BlackHole output ready/ {
+      print "BlackHole output ready"; fflush(); next
+    }
+    /\[SorereHost\] iPhone audio stream received/ {
+      print "iPhone audio received"; fflush(); next
+    }
+    /Error:|Failed|failed|cannot open|not found/ {
+      print; fflush()
+    }
+  '
