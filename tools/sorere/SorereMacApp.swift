@@ -9,7 +9,7 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-private enum HostStatus: Equatable {
+enum HostStatus: Equatable {
     case starting
     case waiting
     case connected
