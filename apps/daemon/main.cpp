@@ -2247,9 +2247,6 @@ static LatencyParams get_latency_params(LatencyProfile profile) {
 
 // Resolve Auto profile by detecting network interface type
 static LatencyProfile resolve_latency_profile(LatencyProfile profile, const std::string& multicast_ip) {
-    if (std::getenv("SORERE_HOST_MODE") != nullptr) {
-        return LatencyProfile::Default;
-    }
     if (profile != LatencyProfile::Auto) return profile;
 
     std::string iface = detect_outgoing_interface(multicast_ip.c_str());
@@ -4012,11 +4009,8 @@ static int run_rx(DaemonConfig cfg) {
     using namespace soluna::transport;
 
     soluna::control::WebSocketServer ws_srv;
-    const bool sorere_host_mode = (std::getenv("SORERE_HOST_MODE") != nullptr);
-    if (!sorere_host_mode) {
-        start_ws_server(ws_srv, cfg.https_enabled,
-                        cfg.security.certificate_path, cfg.security.private_key_path);
-    }
+    start_ws_server(ws_srv, cfg.https_enabled,
+                    cfg.security.certificate_path, cfg.security.private_key_path);
 #ifdef __APPLE__
     start_mdns_advertisement();
 #endif
@@ -4233,7 +4227,7 @@ static int run_rx(DaemonConfig cfg) {
     // Audio callback: ring buffer (or PlayoutBuffer) → convert → playback
     static uint64_t sine_phase = 0;
     bool sine_test = (std::getenv("SOLUNA_SINE_TEST") != nullptr);
-    bool audio_started = audio->start([&](float* buffer, uint32_t frame_count) {
+    audio->start([&](float* buffer, uint32_t frame_count) {
         size_t samples = frame_count * cfg.channels;
 
         if (sine_test) {
@@ -4545,12 +4539,6 @@ static int run_rx(DaemonConfig cfg) {
         }
 #endif
     });
-    if (!audio_started) {
-        fprintf(stderr, "Error: CoreAudio could not start output device '%s'\n",
-                cfg.audio_device.c_str());
-        return 1;
-    }
-    fprintf(stderr, "[SorereHost] BlackHole output ready\n");
 
     // Create transport manager for optional DTLS
     TransportManager transport_mgr(cfg.security);
@@ -5048,11 +5036,8 @@ static int run_rx(DaemonConfig cfg) {
         }
         last_seq = static_cast<int32_t>(full_seq & 0xFFFF);
         packets_received++;
-        if (sorere_host_mode && packets_received == 1) {
-            fprintf(stderr, "[SorereHost] iPhone audio stream received\n");
-        }
 
-        if (!sorere_host_mode && packets_received % 200 == 0) {
+        if (packets_received % 200 == 0) {
             g_packets.store(packets_received);
             g_seq_errors.store(sequence_errors);
             g_buf_fill.store(ring.available_read());
@@ -5060,7 +5045,7 @@ static int run_rx(DaemonConfig cfg) {
             g_buf_cap.store(ring.capacity());
         }
 
-        if (!sorere_host_mode && packets_received % 200 == 0) {
+        if (packets_received % 1000 == 0) {
             printf("%sRX: %lu pkts, seq_err:%lu, dup:%lu, fec:%lu, jitter:%.1fms, buf:%ums, ring:%zu/%zu",
                 isatty(STDOUT_FILENO) ? "\r" : "\n",
                 static_cast<unsigned long>(packets_received),
@@ -5080,15 +5065,13 @@ static int run_rx(DaemonConfig cfg) {
 
     audio->stop();
     if (ptp) ptp->stop();
-    if (!sorere_host_mode) {
-        printf("\nRX stopped. Packets: %lu (OSTP:%lu, AES67:%lu), Errors: %lu, Dup: %lu, FEC: %lu\n",
-            static_cast<unsigned long>(packets_received),
-            static_cast<unsigned long>(ostp_packets),
-            static_cast<unsigned long>(aes67_packets),
-            static_cast<unsigned long>(sequence_errors),
-            static_cast<unsigned long>(duplicate_drops),
-            static_cast<unsigned long>(fec_recoveries));
-    }
+    printf("\nRX stopped. Packets: %lu (OSTP:%lu, AES67:%lu), Errors: %lu, Dup: %lu, FEC: %lu\n",
+        static_cast<unsigned long>(packets_received),
+        static_cast<unsigned long>(ostp_packets),
+        static_cast<unsigned long>(aes67_packets),
+        static_cast<unsigned long>(sequence_errors),
+        static_cast<unsigned long>(duplicate_drops),
+        static_cast<unsigned long>(fec_recoveries));
     g_dsp_chain_ptr = nullptr;
 
 #ifdef SOLUNA_HAS_DLNA
