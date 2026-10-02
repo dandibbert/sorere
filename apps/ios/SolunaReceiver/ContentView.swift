@@ -135,8 +135,9 @@ struct ContentView: View {
                 setMacHost(lastMacHost)
             }
 
+            // Auto-start only after a fresh Bonjour result. A persisted IP may
+            // be stale after DHCP changes, so never auto-key the mic from cache.
             deviceBrowser.startScanning()
-            maybeAutoStart()
         }
         .onDisappear {
             deviceBrowser.stopScanning()
