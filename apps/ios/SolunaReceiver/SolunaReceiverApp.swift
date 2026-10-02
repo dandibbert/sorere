@@ -76,17 +76,8 @@ struct SolunaReceiverApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if hasChosenChannel {
-                    ContentView()
-                        .environmentObject(deepLink)
-                } else {
-                    ChannelOnboardingView {
-                        hasChosenChannel = true
-                    }
-                    .environmentObject(deepLink)
-                }
-            }
+            ContentView()
+                .environmentObject(deepLink)
             .onOpenURL { url in
                 deepLink.handle(url: url)
                 hasChosenChannel = true
