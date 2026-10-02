@@ -188,6 +188,15 @@ private:
         }
 #endif
 
+#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+        // DefaultOutput cannot target a named CoreAudio device.  The Sorere host
+        // needs to render directly into BlackHole without changing the user's
+        // system-wide default output, so use HALOutput whenever an explicit
+        // playback device is requested.
+        const bool explicit_output_device =
+            !capture && !device_id.empty() && device_id != "default";
+#endif
+
         // Describe the Audio Unit
         AudioComponentDescription desc = {};
 #if TARGET_OS_IPHONE
@@ -195,10 +204,9 @@ private:
         desc.componentSubType = kAudioUnitSubType_RemoteIO;
 #else
         desc.componentType = kAudioUnitType_Output;
-        // Use DefaultOutput for playback (simpler, avoids stale IOProc issues).
-        // HALOutput is only needed for capture (explicit device selection).
-        desc.componentSubType = capture ? kAudioUnitSubType_HALOutput
-                                        : kAudioUnitSubType_DefaultOutput;
+        desc.componentSubType = (capture || explicit_output_device)
+            ? kAudioUnitSubType_HALOutput
+            : kAudioUnitSubType_DefaultOutput;
 #endif
         desc.componentManufacturer = kAudioUnitManufacturer_Apple;
 
@@ -246,10 +254,89 @@ private:
                                           sizeof(disable_io));
 #endif
         }
-        // For output (DefaultOutput on macOS / RemoteIO on iOS): no EnableIO needed
+#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+        else if (explicit_output_device) {
+            // HALOutput playback: explicitly enable output bus 0 and disable
+            // input bus 1 so opening BlackHole never requests microphone access.
+            status = AudioUnitSetProperty(audio_unit_,
+                                          kAudioOutputUnitProperty_EnableIO,
+                                          kAudioUnitScope_Output,
+                                          0,
+                                          &enable_io,
+                                          sizeof(enable_io));
+            if (status != noErr) {
+                fprintf(stderr, "CoreAudio: Failed to enable explicit output: %d\n", (int)status);
+                AudioComponentInstanceDispose(audio_unit_);
+                audio_unit_ = nullptr;
+                return false;
+            }
+            AudioUnitSetProperty(audio_unit_,
+                                 kAudioOutputUnitProperty_EnableIO,
+                                 kAudioUnitScope_Input,
+                                 1,
+                                 &disable_io,
+                                 sizeof(disable_io));
+        }
+#endif
+        // DefaultOutput playback and iOS RemoteIO need no extra EnableIO setup.
 
 #if TARGET_OS_MAC && !TARGET_OS_IPHONE
-        // Set device on macOS (HALOutput only — DefaultOutput handles device automatically)
+        if (explicit_output_device) {
+            AudioDeviceID dev_id = 0;
+            try {
+                dev_id = static_cast<AudioDeviceID>(std::stoul(device_id));
+            } catch (const std::exception&) {
+                dev_id = find_device_by_name(device_id, false);
+            }
+
+            if (dev_id == 0) {
+                fprintf(stderr, "CoreAudio: output device '%s' not found\n", device_id.c_str());
+                AudioComponentInstanceDispose(audio_unit_);
+                audio_unit_ = nullptr;
+                return false;
+            }
+
+            // Keep the virtual device on the stream sample rate where possible.
+            Float64 desired_rate = static_cast<Float64>(config.sample_rate);
+            AudioObjectPropertyAddress rate_addr = {
+                kAudioDevicePropertyNominalSampleRate,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            OSStatus rate_status = AudioObjectSetPropertyData(
+                dev_id, &rate_addr, 0, nullptr, sizeof(desired_rate), &desired_rate);
+            if (rate_status != noErr) {
+                fprintf(stderr, "CoreAudio: output sample-rate set warning: %d\n", (int)rate_status);
+            }
+
+            status = AudioUnitSetProperty(audio_unit_,
+                                          kAudioOutputUnitProperty_CurrentDevice,
+                                          kAudioUnitScope_Global,
+                                          0,
+                                          &dev_id,
+                                          sizeof(dev_id));
+            if (status != noErr) {
+                fprintf(stderr, "CoreAudio: Failed to select output device %u: %d\n",
+                        (unsigned)dev_id, (int)status);
+                AudioComponentInstanceDispose(audio_unit_);
+                audio_unit_ = nullptr;
+                return false;
+            }
+
+            UInt32 hw_buf = config.frames_per_buffer;
+            AudioObjectPropertyAddress buf_addr = {
+                kAudioDevicePropertyBufferFrameSize,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            AudioObjectSetPropertyData(dev_id, &buf_addr, 0, nullptr,
+                                       sizeof(hw_buf), &hw_buf);
+
+            fprintf(stderr, "CoreAudio: explicit output -> '%s' (device %u)\n",
+                    device_id.c_str(), (unsigned)dev_id);
+        }
+
+        // Capture path keeps the existing explicit input selection behavior.
         if (capture) {
             AudioDeviceID dev_id = 0;
 
