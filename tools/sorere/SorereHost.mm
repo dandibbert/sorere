@@ -3,7 +3,6 @@
 
 #import <CoreAudio/CoreAudio.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <dns_sd.h>
 
 #include <arpa/inet.h>
 #include <algorithm>
@@ -20,6 +19,7 @@
 #include <vector>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 
 namespace {
@@ -312,37 +312,33 @@ private:
 class BonjourAdvertiser {
 public:
     bool start() {
-        uint16_t port = htons(kPort);
-        DNSServiceErrorType err = DNSServiceRegister(
-            &ref_, 0, 0, "Sorere Host", "_soluna._tcp",
-            nullptr, nullptr, port, 0, nullptr, nullptr, nullptr);
-        if (err != kDNSServiceErr_NoError) return false;
-
-        thread_ = std::thread([this]() {
-            int fd = DNSServiceRefSockFD(ref_);
-            while (gRunning.load() && ref_ && fd >= 0) {
-                fd_set set;
-                FD_ZERO(&set);
-                FD_SET(fd, &set);
-                timeval tv{1, 0};
-                int rc = select(fd + 1, &set, nullptr, nullptr, &tv);
-                if (rc > 0) DNSServiceProcessResult(ref_);
-            }
-        });
+        child_ = fork();
+        if (child_ < 0) return false;
+        if (child_ == 0) {
+            execl("/usr/bin/dns-sd", "dns-sd",
+                  "-R", "Sorere Host", "_soluna._tcp", "local.", "5004",
+                  (char*)nullptr);
+            _exit(127);
+        }
+        usleep(150000);
+        int status = 0;
+        pid_t rc = waitpid(child_, &status, WNOHANG);
+        if (rc == child_) {
+            child_ = -1;
+            return false;
+        }
         return true;
     }
 
     ~BonjourAdvertiser() {
-        if (ref_) {
-            DNSServiceRefDeallocate(ref_);
-            ref_ = nullptr;
+        if (child_ > 0) {
+            kill(child_, SIGTERM);
+            waitpid(child_, nullptr, 0);
         }
-        if (thread_.joinable()) thread_.join();
     }
 
 private:
-    DNSServiceRef ref_ = nullptr;
-    std::thread thread_;
+    pid_t child_ = -1;
 };
 
 bool parse_audio_packet(const uint8_t* packet, size_t length,
