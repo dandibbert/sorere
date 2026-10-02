@@ -43,30 +43,54 @@ jobs:
             -framework CoreFoundation \
             -o build-mac/sorere-host
 
+      - name: Build native Sorere app
+        run: |
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun swiftc             -parse-as-library             -O             -target arm64-apple-macos13.0             -sdk "$SDK"             tools/sorere/SorereMacApp.swift             -framework SwiftUI             -framework AppKit             -framework ServiceManagement             -o build-mac/Sorere
+
       - name: Smoke test
         run: |
           test -x build-mac/sorere-host
+          test -x build-mac/Sorere
           file build-mac/sorere-host
+          file build-mac/Sorere
           bash -n tools/sorere/SorereHost.command
           bash -n tools/sorere/TestBlackHole.command
           bash -n tools/sorere/InstallSorereHost.command
           bash -n tools/sorere/UninstallSorereHost.command
 
-      - name: Package host
+      - name: Package native app
         run: |
-          rm -rf dist/SorereHost
+          rm -rf dist/Sorere.app dist/SorereHost
+          mkdir -p dist/Sorere.app/Contents/MacOS
+          mkdir -p dist/Sorere.app/Contents/Resources
+          cp build-mac/Sorere dist/Sorere.app/Contents/MacOS/Sorere
+          cp build-mac/sorere-host dist/Sorere.app/Contents/Resources/sorere-host
+          cp tools/sorere/SorereMacInfo.plist dist/Sorere.app/Contents/Info.plist
+          chmod +x dist/Sorere.app/Contents/MacOS/Sorere
+          chmod +x dist/Sorere.app/Contents/Resources/sorere-host
+
+          # Ad-hoc signing keeps the two embedded executables internally consistent.
+          codesign --force --sign - dist/Sorere.app/Contents/Resources/sorere-host
+          codesign --force --deep --sign - dist/Sorere.app
+          codesign --verify --deep --strict dist/Sorere.app
+
           mkdir -p dist/SorereHost
-          cp build-mac/sorere-host dist/SorereHost/
+          cp -R dist/Sorere.app dist/SorereHost/
           cp tools/sorere/*.command dist/SorereHost/
           cp LICENSE dist/SorereHost/
-          chmod +x dist/SorereHost/sorere-host dist/SorereHost/*.command
+          chmod +x dist/SorereHost/*.command
+
+          /usr/bin/ditto -c -k --keepParent dist/Sorere.app dist/Sorere-macos-arm64.zip
           /usr/bin/ditto -c -k --keepParent dist/SorereHost dist/SorereHost-macos-arm64.zip
 
-      - name: Upload Mac host
+      - name: Upload Mac app
         uses: actions/upload-artifact@v6
         with:
-          name: SorereHost-macos-arm64
-          path: dist/SorereHost-macos-arm64.zip
+          name: Sorere-macos-arm64
+          path: |
+            dist/Sorere-macos-arm64.zip
+            dist/SorereHost-macos-arm64.zip
           if-no-files-found: error
 
   build-ios:
