@@ -1511,58 +1511,44 @@ public:
     bool start() {
         if (running_.load()) return false;
 
-        // Open mic input
-        audio_device_ = pal::AudioDevice::create();
-        if (!audio_device_) return false;
-
-        pal::AudioStreamConfig audio_cfg;
-        audio_cfg.sample_rate = kDefaultSampleRate;
-        audio_cfg.channels = 1;  // Mono mic
-        audio_cfg.frames_per_buffer = 240;
-        audio_cfg.format = SampleFormat::S24_LE;
-
-        if (!audio_device_->open_input("", audio_cfg)) {
-            fprintf(stderr, "[SolunaTx] Failed to open mic input\n");
-            audio_device_.reset();
-            return false;
-        }
-
-        // Create UDP socket for multicast TX
+        // Create the UDP sender first so capture only starts once the transport
+        // is ready.  Sorere uses direct unicast but the same socket works for
+        // the original multicast mode too.
         socket_ = pal::UdpSocket::create();
         if (!socket_) {
-            audio_device_.reset();
+            fprintf(stderr, "[SorereTx] Failed to create UDP socket\n");
             return false;
         }
 
         running_.store(true);
         ring_buffer_.reset();
         packets_sent_.store(0);
+        peak_level_.store(0.0f, std::memory_order_relaxed);
 
-        // Conversion buffer: mono float → stereo int32_t (S24)
-        // Oversized to handle iOS delivering more frames than requested
-        // (IOBufferDuration is just a preference; actual may be 480+ frames)
-        conv_buf_.resize(4096 * channels_);
+        // Conversion buffer: mono float -> interleaved S24 containers.
+        conv_buf_.resize(8192 * channels_);
 
-        // Start audio capture callback
-        audio_device_->start([this](float* buffer, uint32_t frame_count) {
-            mic_callback(buffer, frame_count);
-        });
+        // The shared PAL RemoteIO input path in upstream can report success even
+        // when AudioOutputUnitStart fails, leaving the TX thread sending silence.
+        // AudioQueue is already used elsewhere in this iOS target (DJ mic mixing)
+        // and gives us an explicit start result, so use it for the dedicated mic.
+        if (!start_audio_queue()) {
+            fprintf(stderr, "[SorereTx] Failed to start iOS microphone AudioQueue\n");
+            running_.store(false);
+            socket_.reset();
+            return false;
+        }
 
-        // Start TX packet thread
         tx_thread_ = std::thread([this]() { tx_loop(); });
-
+        fprintf(stderr, "[SorereTx] iOS microphone capture started\n");
         return true;
     }
 
     void stop() {
-        if (!running_.load()) return;
+        if (!running_.load() && !mic_queue_) return;
         running_.store(false);
 
-        if (audio_device_) {
-            audio_device_->stop();
-            audio_device_->close();
-            audio_device_.reset();
-        }
+        stop_audio_queue();
 
         if (tx_thread_.joinable()) {
             tx_thread_.join();
@@ -1570,6 +1556,7 @@ public:
 
         socket_.reset();
         ring_buffer_.reset();
+        peak_level_.store(0.0f, std::memory_order_relaxed);
     }
 
     bool is_running() const { return running_.load(); }
@@ -1580,6 +1567,93 @@ public:
     std::function<void(const uint8_t*, size_t)> tx_relay_callback;
 
 private:
+    bool start_audio_queue() {
+        AudioStreamBasicDescription fmt{};
+        fmt.mSampleRate = kDefaultSampleRate;
+        fmt.mFormatID = kAudioFormatLinearPCM;
+        fmt.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+        fmt.mBytesPerPacket = sizeof(float);
+        fmt.mFramesPerPacket = 1;
+        fmt.mBytesPerFrame = sizeof(float);
+        fmt.mChannelsPerFrame = 1;
+        fmt.mBitsPerChannel = 32;
+
+        OSStatus st = AudioQueueNewInput(
+            &fmt,
+            audio_queue_callback,
+            this,
+            nullptr,
+            nullptr,
+            0,
+            &mic_queue_);
+        if (st != noErr || !mic_queue_) {
+            fprintf(stderr, "[SorereTx] AudioQueueNewInput failed: %d\n", (int)st);
+            mic_queue_ = nullptr;
+            return false;
+        }
+
+        // 10 ms buffers are small enough for speech latency while avoiding
+        // excessive callback pressure on recent iPhones.
+        constexpr UInt32 kFramesPerBuffer = 480;
+        constexpr UInt32 kBufferBytes = kFramesPerBuffer * sizeof(float);
+        for (int i = 0; i < 3; ++i) {
+            AudioQueueBufferRef buf = nullptr;
+            st = AudioQueueAllocateBuffer(mic_queue_, kBufferBytes, &buf);
+            if (st != noErr || !buf) {
+                fprintf(stderr, "[SorereTx] AudioQueueAllocateBuffer failed: %d\n", (int)st);
+                stop_audio_queue();
+                return false;
+            }
+            buf->mAudioDataByteSize = kBufferBytes;
+            st = AudioQueueEnqueueBuffer(mic_queue_, buf, 0, nullptr);
+            if (st != noErr) {
+                fprintf(stderr, "[SorereTx] AudioQueueEnqueueBuffer failed: %d\n", (int)st);
+                stop_audio_queue();
+                return false;
+            }
+        }
+
+        st = AudioQueueStart(mic_queue_, nullptr);
+        if (st != noErr) {
+            fprintf(stderr, "[SorereTx] AudioQueueStart failed: %d\n", (int)st);
+            stop_audio_queue();
+            return false;
+        }
+        return true;
+    }
+
+    void stop_audio_queue() {
+        if (!mic_queue_) return;
+        AudioQueueStop(mic_queue_, true);
+        AudioQueueDispose(mic_queue_, true);
+        mic_queue_ = nullptr;
+    }
+
+    static void audio_queue_callback(void* ctx,
+                                     AudioQueueRef queue,
+                                     AudioQueueBufferRef buffer,
+                                     const AudioTimeStamp*,
+                                     UInt32,
+                                     const AudioStreamPacketDescription*) {
+        auto* self = static_cast<TransmitterImpl*>(ctx);
+        if (!self || !buffer) return;
+
+        if (self->running_.load(std::memory_order_relaxed) &&
+            buffer->mAudioData && buffer->mAudioDataByteSize > 0) {
+            auto* samples = static_cast<float*>(buffer->mAudioData);
+            uint32_t frames = static_cast<uint32_t>(
+                buffer->mAudioDataByteSize / sizeof(float));
+            self->mic_callback(samples, frames);
+        }
+
+        if (self->running_.load(std::memory_order_relaxed)) {
+            OSStatus st = AudioQueueEnqueueBuffer(queue, buffer, 0, nullptr);
+            if (st != noErr) {
+                fprintf(stderr, "[SorereTx] re-enqueue failed: %d\n", (int)st);
+            }
+        }
+    }
+
     void mic_callback(float* buffer, uint32_t frame_count) {
         // Track peak level for UI meter
         float peak = 0.0f;
@@ -1681,7 +1755,7 @@ private:
     pipeline::RingBuffer ring_buffer_;
     uint32_t ssrc_;
 
-    std::unique_ptr<pal::AudioDevice> audio_device_;
+    AudioQueueRef mic_queue_ = nullptr;
     std::unique_ptr<pal::UdpSocket> socket_;
     std::vector<int32_t> conv_buf_;
     std::thread tx_thread_;
