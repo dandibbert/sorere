@@ -74,7 +74,14 @@ enum HostStatus: Equatable {
     }
 }
 
-final class SorereAppDelegate: NSObject, NSApplicationDelegate {
+final class SorereAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
+    private var statusItem: NSStatusItem?
+    private weak var mainWindow: NSWindow?
+
+    private var controller: HostController {
+        HostController.shared
+    }
+
     private var showInDock: Bool {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: "sorere.showInDock") == nil {
@@ -88,20 +95,163 @@ final class SorereAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard !showInDock else { return }
+        installStatusItem()
 
-        // WindowGroup creates its first window automatically. In menu-bar-only
-        // mode close that initial window immediately; the user can reopen it
-        // later from the menu bar without restoring a Dock icon.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            NSApp.windows
-                .filter { $0.isVisible && !($0 is NSPanel) }
-                .forEach { $0.close() }
+        // WindowGroup creates the first window automatically. In menu-bar-only
+        // mode keep it alive but hidden so "Open Sorere" can always restore it.
+        if !showInDock {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.mainWindow?.orderOut(nil)
+                NSApp.windows
+                    .filter { $0.isVisible && !($0 is NSPanel) }
+                    .forEach { $0.orderOut(nil) }
+            }
         }
+    }
+
+    func registerMainWindow(_ window: NSWindow) {
+        mainWindow = window
+        window.delegate = self
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Sorere")
+            image?.isTemplate = true
+            button.image = image
+            button.toolTip = "Sorere"
+        }
+
+        let menu = NSMenu()
+        menu.delegate = self
+        item.menu = menu
+        statusItem = item
+        rebuildStatusMenu(menu)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        rebuildStatusMenu(menu)
+    }
+
+    private func rebuildStatusMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let status = NSMenuItem(title: controller.status.title, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+
+        if let address = controller.iPhoneAddress {
+            let device = NSMenuItem(title: "iPhone · \(address)", action: nil, keyEquivalent: "")
+            device.isEnabled = false
+            menu.addItem(device)
+        }
+
+        menu.addItem(.separator())
+
+        let open = NSMenuItem(
+            title: "Open Sorere",
+            action: #selector(openSorere),
+            keyEquivalent: ""
+        )
+        open.target = self
+        menu.addItem(open)
+
+        let host = NSMenuItem(
+            title: controller.isRunning ? "Pause Host" : "Start Host",
+            action: #selector(toggleHost),
+            keyEquivalent: ""
+        )
+        host.target = self
+        menu.addItem(host)
+
+        let test = NSMenuItem(
+            title: "Test BlackHole",
+            action: #selector(testBlackHole),
+            keyEquivalent: ""
+        )
+        test.target = self
+        test.isEnabled = !controller.isTesting
+        menu.addItem(test)
+
+        menu.addItem(.separator())
+
+        let dock = NSMenuItem(
+            title: "Show in Dock",
+            action: #selector(toggleDock),
+            keyEquivalent: ""
+        )
+        dock.target = self
+        dock.state = controller.showInDock ? .on : .off
+        menu.addItem(dock)
+
+        let launch = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        launch.target = self
+        launch.state = controller.launchAtLogin ? .on : .off
+        menu.addItem(launch)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(
+            title: "Quit Sorere",
+            action: #selector(quitSorere),
+            keyEquivalent: "q"
+        )
+        quit.target = self
+        menu.addItem(quit)
+    }
+
+    @objc private func openSorere() {
+        if let window = mainWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // The window should normally be retained because windowShouldClose only
+        // hides it. Keep a defensive fallback for unusual scene recreation.
+        if let window = NSApp.windows.first(where: { !($0 is NSPanel) }) {
+            registerMainWindow(window)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    @objc private func toggleHost() {
+        controller.isRunning ? controller.stop() : controller.startIfNeeded()
+    }
+
+    @objc private func testBlackHole() {
+        controller.runBlackHoleTest()
+    }
+
+    @objc private func toggleDock() {
+        controller.setShowInDock(!controller.showInDock)
+        if controller.showInDock {
+            openSorere()
+        }
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        controller.setLaunchAtLogin(!controller.launchAtLogin)
+    }
+
+    @objc private func quitSorere() {
+        NSApp.terminate(nil)
     }
 }
 
 final class HostController: ObservableObject {
+    static let shared = HostController()
     @Published private(set) var status: HostStatus = .starting
     @Published private(set) var level: Double = 0
     @Published private(set) var iPhoneAddress: String?
@@ -216,12 +366,12 @@ final class HostController: ObservableObject {
         } else {
             NSApp.setActivationPolicy(.accessory)
 
-            // Keep the host and MenuBarExtra alive, but close ordinary windows
-            // so the app truly behaves like a background menu-bar utility.
+            // Keep the host and native status item alive. Hide ordinary windows
+            // without destroying them so the status item can always reopen UI.
             DispatchQueue.main.async {
                 NSApp.windows
                     .filter { $0.isVisible && !($0 is NSPanel) }
-                    .forEach { $0.close() }
+                    .forEach { $0.orderOut(nil) }
             }
         }
     }
@@ -399,25 +549,38 @@ final class HostController: ObservableObject {
 @main
 struct SorereMacApp: App {
     @NSApplicationDelegateAdaptor(SorereAppDelegate.self) private var appDelegate
-    @StateObject private var controller = HostController()
+    @StateObject private var controller = HostController.shared
 
     var body: some Scene {
         WindowGroup("Sorere", id: "main") {
             MainWindow()
                 .environmentObject(controller)
+                .background(MainWindowRegistrar())
                 .onAppear {
                     controller.startIfNeeded()
                 }
         }
         .defaultSize(width: 510, height: 470)
+    }
+}
 
-        MenuBarExtra {
-            MenuBarPanel()
-                .environmentObject(controller)
-        } label: {
-            Image(systemName: controller.menuSymbol)
+private struct MainWindowRegistrar: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            guard let window = view.window,
+                  let delegate = NSApp.delegate as? SorereAppDelegate else { return }
+            delegate.registerMainWindow(window)
         }
-        .menuBarExtraStyle(.window)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window,
+                  let delegate = NSApp.delegate as? SorereAppDelegate else { return }
+            delegate.registerMainWindow(window)
+        }
     }
 }
 
@@ -592,68 +755,6 @@ private struct MainWindow: View {
             .buttonStyle(.link)
         }
         .font(.caption)
-    }
-}
-
-private struct MenuBarPanel: View {
-    @EnvironmentObject private var controller: HostController
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: controller.status.symbol)
-                    .font(.title3)
-                    .foregroundStyle(controller.status.tint)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(controller.status.title)
-                        .font(.headline)
-                    Text(controller.iPhoneAddress ?? "Sorere Host")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            }
-
-            MacLevelMeter(level: controller.level,
-                          active: controller.status == .streaming,
-                          tint: controller.status.tint)
-                .frame(height: 18)
-
-            Divider()
-
-            Button("Open Sorere") {
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-
-            Button(controller.isRunning ? "Pause Host" : "Start Host") {
-                controller.isRunning ? controller.stop() : controller.startIfNeeded()
-            }
-
-            Button("Test BlackHole") {
-                controller.runBlackHoleTest()
-            }
-            .disabled(controller.isTesting)
-
-            Toggle(
-                "Show in Dock",
-                isOn: Binding(
-                    get: { controller.showInDock },
-                    set: { controller.setShowInDock($0) }
-                )
-            )
-
-            Divider()
-
-            Button("Quit Sorere") {
-                NSApp.terminate(nil)
-            }
-        }
-        .padding(14)
-        .frame(width: 270)
     }
 }
 
