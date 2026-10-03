@@ -232,6 +232,7 @@ final class AudioReceiver: ObservableObject {
     private var watchdogTimer: Timer?
     private var statsTimer: Timer?
     private var levelTimer: Timer?
+    private var micStatusTimer: Timer?
     private var rtcpTimer: Timer?
     private var lastPacketCount: UInt64 = 0
     private var staleTicks: Int = 0
@@ -752,6 +753,8 @@ final class AudioReceiver: ObservableObject {
             suppressInterruption = true
             receiver.stopMicTransmit()
             isMicTransmitting = false
+            stopMicStatusPolling()
+            micInputLevel = 0
             // Restore on background to avoid blocking
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
@@ -796,6 +799,7 @@ final class AudioReceiver: ObservableObject {
                     Task { @MainActor in
                         if micOk {
                             self.isMicTransmitting = true
+                            self.startMicStatusPolling()
                         } else {
                             self.debugLog += "\nMIC FAILED: startMicTransmit returned NO"
                         }
@@ -806,6 +810,24 @@ final class AudioReceiver: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Poll TX-only state even when the receiver/playback engine is not running.
+    /// The dedicated Sorere Mic UI intentionally does not join the public relay.
+    private func startMicStatusPolling() {
+        stopMicStatusPolling()
+        micStatusTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.txPacketsSent = self.receiver.txPacketsSent
+                self.micInputLevel = self.receiver.micInputLevel
+            }
+        }
+    }
+
+    private func stopMicStatusPolling() {
+        micStatusTimer?.invalidate()
+        micStatusTimer = nil
     }
 
     // MARK: - Talk Mode
