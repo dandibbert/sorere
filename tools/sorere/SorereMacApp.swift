@@ -74,6 +74,33 @@ enum HostStatus: Equatable {
     }
 }
 
+final class SorereAppDelegate: NSObject, NSApplicationDelegate {
+    private var showInDock: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "sorere.showInDock") == nil {
+            return true
+        }
+        return defaults.bool(forKey: "sorere.showInDock")
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !showInDock else { return }
+
+        // WindowGroup creates its first window automatically. In menu-bar-only
+        // mode close that initial window immediately; the user can reopen it
+        // later from the menu bar without restoring a Dock icon.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.windows
+                .filter { $0.isVisible && !($0 is NSPanel) }
+                .forEach { $0.close() }
+        }
+    }
+}
+
 final class HostController: ObservableObject {
     @Published private(set) var status: HostStatus = .starting
     @Published private(set) var level: Double = 0
@@ -81,6 +108,7 @@ final class HostController: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isTesting = false
     @Published var launchAtLogin = false
+    @Published var showInDock = true
     @Published var testResult: String?
 
     private enum Mode {
@@ -98,6 +126,10 @@ final class HostController: ObservableObject {
 
     init() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        let defaults = UserDefaults.standard
+        showInDock = defaults.object(forKey: "sorere.showInDock") == nil
+            ? true
+            : defaults.bool(forKey: "sorere.showInDock")
 
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
@@ -165,6 +197,26 @@ final class HostController: ObservableObject {
         } catch {
             launchAtLogin = SMAppService.mainApp.status == .enabled
             testResult = "Could not change launch-at-login: \(error.localizedDescription)"
+        }
+    }
+
+    func setShowInDock(_ enabled: Bool) {
+        showInDock = enabled
+        UserDefaults.standard.set(enabled, forKey: "sorere.showInDock")
+
+        if enabled {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            NSApp.setActivationPolicy(.accessory)
+
+            // Keep the host and MenuBarExtra alive, but close ordinary windows
+            // so the app truly behaves like a background menu-bar utility.
+            DispatchQueue.main.async {
+                NSApp.windows
+                    .filter { $0.isVisible && !($0 is NSPanel) }
+                    .forEach { $0.close() }
+            }
         }
     }
 
@@ -340,6 +392,7 @@ final class HostController: ObservableObject {
 
 @main
 struct SorereMacApp: App {
+    @NSApplicationDelegateAdaptor(SorereAppDelegate.self) private var appDelegate
     @StateObject private var controller = HostController()
 
     var body: some Scene {
@@ -506,12 +559,21 @@ private struct MainWindow: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 18) {
             Toggle(
                 "Launch at Login",
                 isOn: Binding(
                     get: { controller.launchAtLogin },
                     set: { controller.setLaunchAtLogin($0) }
+                )
+            )
+            .toggleStyle(.switch)
+
+            Toggle(
+                "Show in Dock",
+                isOn: Binding(
+                    get: { controller.showInDock },
+                    set: { controller.setShowInDock($0) }
                 )
             )
             .toggleStyle(.switch)
@@ -569,6 +631,14 @@ private struct MenuBarPanel: View {
                 controller.runBlackHoleTest()
             }
             .disabled(controller.isTesting)
+
+            Toggle(
+                "Show in Dock",
+                isOn: Binding(
+                    get: { controller.showInDock },
+                    set: { controller.setShowInDock($0) }
+                )
+            )
 
             Divider()
 
