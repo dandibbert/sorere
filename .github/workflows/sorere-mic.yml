@@ -110,7 +110,7 @@ jobs:
           context.imageInterpolation = .high
 
           NSColor.clear.setFill()
-          NSRect(x: 0, y: 0, width: size, height: size).fill()
+          NSBezierPath(rect: NSRect(x: 0, y: 0, width: size, height: size)).fill()
 
           // 82% footprint matches modern macOS rounded-square app icons much
           // better than an edge-to-edge iOS canvas.
@@ -128,8 +128,8 @@ jobs:
               from: NSRect(origin: .zero, size: source.size),
               operation: .copy,
               fraction: 1.0,
-              respectFlipped: true,
-              hints: [.interpolation: NSImageInterpolation.high]
+              respectFlipped: false,
+              hints: nil
           )
 
           context.flushGraphics()
