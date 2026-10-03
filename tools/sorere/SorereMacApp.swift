@@ -138,6 +138,12 @@ final class HostController: ObservableObject {
         ) { [weak self] _ in
             self?.process?.terminate()
         }
+
+        // Do not depend on the main window appearing. Menu-bar-only launches
+        // should bring up the audio host immediately in the background.
+        DispatchQueue.main.async { [weak self] in
+            self?.startIfNeeded()
+        }
     }
 
     deinit {
