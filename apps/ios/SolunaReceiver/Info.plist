@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Soluna</string>
+	<string>Sorere Mic</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,58 +13,25 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Soluna</string>
+	<string>Sorere Mic</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.soluna.SolunaReceiver</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>soluna</string>
-			</array>
-		</dict>
-	</array>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>202603250013</string>
+	<string>2</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>relay.solun.art</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
-		</dict>
-	</dict>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_soluna._tcp</string>
-		<string>_soluna-relay._tcp</string>
 	</array>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Soluna reads your heart rate to sync heartbeat visuals with other listeners.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Soluna Rx needs access to the local network to receive audio streams from other devices.</string>
+	<string>Sorere Mic sends your microphone audio directly to your Mac on the local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Soluna uses the microphone to capture and transmit audio to other devices on the network.</string>
-	<key>NSMotionUsageDescription</key>
-	<string>Soluna uses head tracking with AirPods for spatial audio.</string>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSUserActivityTypes</key>
-	<array>
-		<string>art.solun.channel</string>
-	</array>
+	<string>Sorere Mic uses the iPhone microphone to provide audio input to your Mac.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -84,8 +51,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
