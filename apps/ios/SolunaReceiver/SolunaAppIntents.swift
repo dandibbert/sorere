@@ -34,6 +34,9 @@ extension Notification.Name {
     static let solunaIntentPlay          = Notification.Name("solunaIntentPlay")
     static let solunaIntentStop          = Notification.Name("solunaIntentStop")
     static let solunaIntentSwitchChannel = Notification.Name("solunaIntentSwitchChannel")
+    static let solunaIntentMicStart      = Notification.Name("solunaIntentMicStart")
+    static let solunaIntentMicStop       = Notification.Name("solunaIntentMicStop")
+    static let solunaIntentMicToggle     = Notification.Name("solunaIntentMicToggle")
 }
 
 // MARK: - Play Intent
@@ -92,6 +95,55 @@ struct SwitchChannelIntent: AppIntent {
     }
 }
 
+// MARK: - Mic (iPhone → Mac audio input) Intents
+//
+// Drive the same mic-transmit path as the Mic tab: the iPhone microphone is
+// sent over LAN multicast / WAN relay so the Mac side can use it as audio input.
+
+@available(iOS 16.0, *)
+struct StartMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start Soluna Mic"
+    static var description = IntentDescription("Start sending the iPhone microphone to Soluna (Mac audio input).")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Channel", description: "Defaults to the channel set in the Mic tab.")
+    var channel: SolunaChannelEnum?
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        var info: [String: Any] = [:]
+        if let channel { info["channel"] = channel.rawValue }
+        NotificationCenter.default.post(name: .solunaIntentMicStart, object: nil, userInfo: info)
+        return .result(dialog: "Soluna mic on.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct StopMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Stop Soluna Mic"
+    static var description = IntentDescription("Stop sending the iPhone microphone to Soluna.")
+    static var openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        NotificationCenter.default.post(name: .solunaIntentMicStop, object: nil)
+        return .result(dialog: "Soluna mic off.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct ToggleMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Soluna Mic"
+    static var description = IntentDescription("Turn the iPhone microphone feed to Soluna on if off, off if on.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        NotificationCenter.default.post(name: .solunaIntentMicToggle, object: nil)
+        return .result(dialog: "Soluna mic toggled.")
+    }
+}
+
 // MARK: - App Shortcuts Provider
 
 @available(iOS 16.0, *)
@@ -125,6 +177,32 @@ struct SolunaShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Switch Channel",
             systemImageName: "antenna.radiowaves.left.and.right"
+        )
+        AppShortcut(
+            intent: StartMicIntent(),
+            phrases: [
+                "Start mic in \(.applicationName)",
+                "Turn on \(.applicationName) mic",
+            ],
+            shortTitle: "Start Mic",
+            systemImageName: "mic.fill"
+        )
+        AppShortcut(
+            intent: StopMicIntent(),
+            phrases: [
+                "Stop mic in \(.applicationName)",
+                "Turn off \(.applicationName) mic",
+            ],
+            shortTitle: "Stop Mic",
+            systemImageName: "mic.slash.fill"
+        )
+        AppShortcut(
+            intent: ToggleMicIntent(),
+            phrases: [
+                "Toggle \(.applicationName) mic",
+            ],
+            shortTitle: "Toggle Mic",
+            systemImageName: "mic.circle"
         )
     }
 }

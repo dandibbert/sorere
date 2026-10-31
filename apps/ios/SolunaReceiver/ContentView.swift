@@ -152,6 +152,14 @@ struct ContentView: View {
             receiver.toggleMic()
         }
     }
+    /// Shortcuts/Siri entry point: explicit on/off for mic → Mac input.
+    private func setMicFromIntent(on: Bool, channel: String?) {
+        guard on != isMicActive else { return }
+        if on, let channel, !channel.isEmpty { micChannel = channel }
+        // Karaoke (local monitor only) never reaches the Mac, so fall back to LAN send.
+        if on, micMode == 2 { micMode = 0 }
+        toggleMic()
+    }
     // MARK: - My Channels (channels I created — only these can broadcast)
     private static let myChannelsKey = "soluna_my_channels"
     private var myChannels: [String] {
@@ -443,6 +451,15 @@ struct ContentView: View {
             if let ch = notification.userInfo?["channel"] as? String {
                 switchChannel(ch)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicStart)) { notification in
+            setMicFromIntent(on: true, channel: notification.userInfo?["channel"] as? String)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicStop)) { _ in
+            setMicFromIntent(on: false, channel: nil)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicToggle)) { _ in
+            setMicFromIntent(on: !isMicActive, channel: nil)
         }
         // MARK: - SharePlay Channel Sync
         .onReceive(NotificationCenter.default.publisher(for: .solunaChannelChanged)) { notification in
