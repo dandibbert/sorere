@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var didAutoStart = false
     @State private var permissionDenied = false
     @State private var showSettings = false
+    /// A Shortcuts "start" arrived before a Mac was found; start once one is.
+    @State private var pendingMicStart = false
 
     private let audioPort: UInt16 = 5004
 
@@ -66,6 +68,10 @@ struct ContentView: View {
             }
 
             deviceBrowser.startScanning()
+            handleMicIntent()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .sorereMicIntent)) { _ in
+            handleMicIntent()
         }
         .onDisappear {
             deviceBrowser.stopScanning()
@@ -73,6 +79,7 @@ struct ContentView: View {
         .onChange(of: deviceBrowser.devices) { devices in
             guard let device = devices.first else { return }
             setMacHost(device.host, name: device.name)
+            resolvePendingStart()
             maybeAutoStart()
         }
     }
@@ -390,7 +397,45 @@ struct ContentView: View {
         guard !host.isEmpty else { return }
         setMacHost(host, name: "Manual Mac")
         manualHost = ""
+        resolvePendingStart()
         maybeAutoStart()
+    }
+
+    // MARK: - Shortcuts / Siri
+
+    private func handleMicIntent() {
+        guard let command = SorereMicIntentCommand.consume() else { return }
+        switch command {
+        case SorereMicIntentCommand.start:
+            requestMicStart()
+        case SorereMicIntentCommand.stop:
+            requestMicStop()
+        case SorereMicIntentCommand.toggle:
+            if receiver.isMicTransmitting || pendingMicStart { requestMicStop() } else { requestMicStart() }
+        default:
+            break
+        }
+    }
+
+    private func requestMicStart() {
+        guard !receiver.isMicTransmitting else { return }
+        if macHost != nil {
+            pendingMicStart = false
+            toggleMic()
+        } else {
+            pendingMicStart = true
+        }
+    }
+
+    private func requestMicStop() {
+        pendingMicStart = false
+        if receiver.isMicTransmitting { toggleMic() }
+    }
+
+    private func resolvePendingStart() {
+        guard pendingMicStart, macHost != nil, !receiver.isMicTransmitting else { return }
+        pendingMicStart = false
+        toggleMic()
     }
 
     private func refreshPermissionState() {

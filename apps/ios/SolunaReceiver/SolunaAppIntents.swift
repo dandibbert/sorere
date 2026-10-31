@@ -1,130 +1,114 @@
 //
 //  SolunaAppIntents.swift
-//  SolunaReceiver
+//  Sorere Mic
 //
-//  Siri Shortcuts via AppIntents framework (iOS 16+).
-//  Intents post notifications that ContentView observes to trigger playback.
+//  Shortcuts / Siri actions to start, stop and toggle the iPhone → Mac microphone.
+//
+//  Intents write the requested command to UserDefaults and post a notification.
+//  ContentView consumes the command on the notification AND on appear, so a cold
+//  launch triggered by the intent (app not yet running) is not lost.
 //
 
 import AppIntents
 import Foundation
 
-// MARK: - Channel Enum
+// MARK: - Command plumbing
 
-@available(iOS 16.0, *)
-enum SolunaChannelEnum: String, AppEnum {
-    case soluna, jazz, lofi, chill, dance, bjj, yuki
+enum SorereMicIntentCommand {
+    static let defaultsKey = "sorere.pendingMicIntent"
+    static let start  = "start"
+    static let stop   = "stop"
+    static let toggle = "toggle"
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Soluna Channel"
+    static func send(_ command: String) {
+        UserDefaults.standard.set(command, forKey: defaultsKey)
+        NotificationCenter.default.post(name: .sorereMicIntent, object: nil)
+    }
 
-    static var caseDisplayRepresentations: [SolunaChannelEnum: DisplayRepresentation] = [
-        .soluna: "Soluna",
-        .jazz:   "Jazz",
-        .lofi:   "Lo-Fi",
-        .chill:  "Chill",
-        .dance:  "Dance",
-        .bjj:    "BJJ",
-        .yuki:   "Yuki",
-    ]
-}
-
-// MARK: - Notification Names
-
-extension Notification.Name {
-    static let solunaIntentPlay          = Notification.Name("solunaIntentPlay")
-    static let solunaIntentStop          = Notification.Name("solunaIntentStop")
-    static let solunaIntentSwitchChannel = Notification.Name("solunaIntentSwitchChannel")
-}
-
-// MARK: - Play Intent
-
-@available(iOS 16.0, *)
-struct PlaySolunaIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play Soluna Radio"
-    static var description = IntentDescription("Start playing Soluna Radio, optionally on a specific channel.")
-    static var openAppWhenRun: Bool = true
-
-    @Parameter(title: "Channel")
-    var channel: SolunaChannelEnum?
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let ch = channel?.rawValue ?? UserDefaults.standard.string(forKey: "channel") ?? "soluna"
-        UserDefaults.standard.set(ch, forKey: "siri_command")
-        NotificationCenter.default.post(name: .solunaIntentPlay, object: nil, userInfo: ["channel": ch])
-        let label = channel?.rawValue.capitalized ?? "Soluna"
-        return .result(dialog: "Playing \(label) on Soluna Radio.")
+    /// Returns and clears the pending command, if any.
+    static func consume() -> String? {
+        let defaults = UserDefaults.standard
+        guard let command = defaults.string(forKey: defaultsKey) else { return nil }
+        defaults.removeObject(forKey: defaultsKey)
+        return command
     }
 }
 
-// MARK: - Stop Intent
+extension Notification.Name {
+    static let sorereMicIntent = Notification.Name("sorereMicIntent")
+}
+
+// MARK: - Intents
 
 @available(iOS 16.0, *)
-struct StopSolunaIntent: AppIntent {
-    static var title: LocalizedStringResource = "Stop Soluna Radio"
-    static var description = IntentDescription("Stop playing Soluna Radio.")
+struct StartMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start Sorere Mic"
+    static var description = IntentDescription("Start sending the iPhone microphone to your Mac.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        SorereMicIntentCommand.send(SorereMicIntentCommand.start)
+        return .result(dialog: "Sorere Mic on.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct StopMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Stop Sorere Mic"
+    static var description = IntentDescription("Stop sending the iPhone microphone to your Mac.")
     static var openAppWhenRun: Bool = false
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        NotificationCenter.default.post(name: .solunaIntentStop, object: nil)
-        return .result(dialog: "Soluna Radio stopped.")
+        SorereMicIntentCommand.send(SorereMicIntentCommand.stop)
+        return .result(dialog: "Sorere Mic off.")
     }
 }
 
-// MARK: - Switch Channel Intent
-
 @available(iOS 16.0, *)
-struct SwitchChannelIntent: AppIntent {
-    static var title: LocalizedStringResource = "Switch Soluna Channel"
-    static var description = IntentDescription("Switch Soluna Radio to a different channel.")
+struct ToggleMicIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Sorere Mic"
+    static var description = IntentDescription("Turn the iPhone → Mac microphone on if it is off, off if it is on.")
     static var openAppWhenRun: Bool = true
-
-    @Parameter(title: "Channel")
-    var channel: SolunaChannelEnum
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let ch = channel.rawValue
-        UserDefaults.standard.set(ch, forKey: "siri_command")
-        NotificationCenter.default.post(name: .solunaIntentSwitchChannel, object: nil, userInfo: ["channel": ch])
-        return .result(dialog: "Switched to \(channel.rawValue.capitalized).")
+        SorereMicIntentCommand.send(SorereMicIntentCommand.toggle)
+        return .result(dialog: "Sorere Mic toggled.")
     }
 }
 
-// MARK: - App Shortcuts Provider
+// MARK: - App Shortcuts
 
 @available(iOS 16.0, *)
 struct SolunaShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: PlaySolunaIntent(),
+            intent: StartMicIntent(),
             phrases: [
-                "Play \(.applicationName)",
-                "Play \(.applicationName) radio",
                 "Start \(.applicationName)",
+                "Turn on \(.applicationName)",
             ],
-            shortTitle: "Play Soluna",
-            systemImageName: "play.fill"
+            shortTitle: "Start Mic",
+            systemImageName: "mic.fill"
         )
         AppShortcut(
-            intent: StopSolunaIntent(),
+            intent: StopMicIntent(),
             phrases: [
                 "Stop \(.applicationName)",
-                "Stop \(.applicationName) radio",
-                "Pause \(.applicationName)",
+                "Turn off \(.applicationName)",
             ],
-            shortTitle: "Stop Soluna",
-            systemImageName: "stop.fill"
+            shortTitle: "Stop Mic",
+            systemImageName: "mic.slash.fill"
         )
         AppShortcut(
-            intent: SwitchChannelIntent(),
+            intent: ToggleMicIntent(),
             phrases: [
-                "Switch \(.applicationName) to \(\.$channel)",
-                "Play \(\.$channel) on \(.applicationName)",
+                "Toggle \(.applicationName)",
             ],
-            shortTitle: "Switch Channel",
-            systemImageName: "antenna.radiowaves.left.and.right"
+            shortTitle: "Toggle Mic",
+            systemImageName: "mic.circle"
         )
     }
 }
