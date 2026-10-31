@@ -117,13 +117,6 @@ struct ContentView: View {
         let recent = recentChannels.filter { $0 != name }
         recentChannelsJSON = (try? String(data: JSONEncoder().encode(recent), encoding: .utf8)) ?? "[]"
     }
-    /// Shortcuts/Siri entry point: make sure audio is flowing, then record it.
-    private func startRecordingFromIntent() {
-        if receiver.state != .receiving { receiver.start() }
-        // start() already begins recording when "Auto Record" is enabled.
-        if !receiver.isRecording { receiver.startAutoRecording() }
-    }
-
     private func switchChannel(_ name: String) {
         let ch = name.trimmingCharacters(in: .whitespaces); guard !ch.isEmpty else { return }
         UserDefaults.standard.set(ch, forKey: "channel"); groupCode = ch
@@ -158,6 +151,14 @@ struct ContentView: View {
             receiver.micGlobal = (micMode == 1)
             receiver.toggleMic()
         }
+    }
+    /// Shortcuts/Siri entry point: explicit on/off for mic → Mac input.
+    private func setMicFromIntent(on: Bool, channel: String?) {
+        guard on != isMicActive else { return }
+        if on, let channel, !channel.isEmpty { micChannel = channel }
+        // Karaoke (local monitor only) never reaches the Mac, so fall back to LAN send.
+        if on, micMode == 2 { micMode = 0 }
+        toggleMic()
     }
     // MARK: - My Channels (channels I created — only these can broadcast)
     private static let myChannelsKey = "soluna_my_channels"
@@ -451,14 +452,14 @@ struct ContentView: View {
                 switchChannel(ch)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentRecordStart)) { _ in
-            startRecordingFromIntent()
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicStart)) { notification in
+            setMicFromIntent(on: true, channel: notification.userInfo?["channel"] as? String)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentRecordStop)) { _ in
-            _ = receiver.stopAutoRecording()
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicStop)) { _ in
+            setMicFromIntent(on: false, channel: nil)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentRecordToggle)) { _ in
-            if receiver.isRecording { _ = receiver.stopAutoRecording() } else { startRecordingFromIntent() }
+        .onReceive(NotificationCenter.default.publisher(for: .solunaIntentMicToggle)) { _ in
+            setMicFromIntent(on: !isMicActive, channel: nil)
         }
         // MARK: - SharePlay Channel Sync
         .onReceive(NotificationCenter.default.publisher(for: .solunaChannelChanged)) { notification in
