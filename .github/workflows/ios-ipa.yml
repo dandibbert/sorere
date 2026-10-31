@@ -32,7 +32,7 @@ jobs:
           cd apps/ios
           xcodebuild archive \
             -project Soluna.xcodeproj \
-            -scheme SolunaReceiver \
+            -scheme Soluna \
             -configuration Release \
             -sdk iphoneos \
             -archivePath "$RUNNER_TEMP/SolunaReceiver.xcarchive" \
