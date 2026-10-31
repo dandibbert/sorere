@@ -36,6 +36,8 @@ enum SorereMicIntentCommand {
 
 extension Notification.Name {
     static let sorereMicIntent = Notification.Name("sorereMicIntent")
+    /// Still posted by SleepTimer; kept so it keeps compiling (nothing observes it in Sorere Mic).
+    static let solunaIntentStop = Notification.Name("solunaIntentStop")
 }
 
 // MARK: - Intents
