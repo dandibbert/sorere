@@ -34,6 +34,9 @@ extension Notification.Name {
     static let solunaIntentPlay          = Notification.Name("solunaIntentPlay")
     static let solunaIntentStop          = Notification.Name("solunaIntentStop")
     static let solunaIntentSwitchChannel = Notification.Name("solunaIntentSwitchChannel")
+    static let solunaIntentRecordStart   = Notification.Name("solunaIntentRecordStart")
+    static let solunaIntentRecordStop    = Notification.Name("solunaIntentRecordStop")
+    static let solunaIntentRecordToggle  = Notification.Name("solunaIntentRecordToggle")
 }
 
 // MARK: - Play Intent
@@ -92,6 +95,47 @@ struct SwitchChannelIntent: AppIntent {
     }
 }
 
+// MARK: - Recording Intents
+
+@available(iOS 16.0, *)
+struct StartRecordingIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start Soluna Recording"
+    static var description = IntentDescription("Start recording the audio Soluna is receiving. Starts playback first if it is stopped.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        NotificationCenter.default.post(name: .solunaIntentRecordStart, object: nil)
+        return .result(dialog: "Recording started.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct StopRecordingIntent: AppIntent {
+    static var title: LocalizedStringResource = "Stop Soluna Recording"
+    static var description = IntentDescription("Stop the current Soluna recording and save it to the Documents folder.")
+    static var openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        NotificationCenter.default.post(name: .solunaIntentRecordStop, object: nil)
+        return .result(dialog: "Recording stopped.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct ToggleRecordingIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Soluna Recording"
+    static var description = IntentDescription("Start recording if idle, stop recording if active.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        NotificationCenter.default.post(name: .solunaIntentRecordToggle, object: nil)
+        return .result(dialog: "Recording toggled.")
+    }
+}
+
 // MARK: - App Shortcuts Provider
 
 @available(iOS 16.0, *)
@@ -125,6 +169,31 @@ struct SolunaShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Switch Channel",
             systemImageName: "antenna.radiowaves.left.and.right"
+        )
+        AppShortcut(
+            intent: StartRecordingIntent(),
+            phrases: [
+                "Start recording in \(.applicationName)",
+                "Record with \(.applicationName)",
+            ],
+            shortTitle: "Start Recording",
+            systemImageName: "record.circle"
+        )
+        AppShortcut(
+            intent: StopRecordingIntent(),
+            phrases: [
+                "Stop recording in \(.applicationName)",
+            ],
+            shortTitle: "Stop Recording",
+            systemImageName: "stop.circle"
+        )
+        AppShortcut(
+            intent: ToggleRecordingIntent(),
+            phrases: [
+                "Toggle recording in \(.applicationName)",
+            ],
+            shortTitle: "Toggle Recording",
+            systemImageName: "record.circle.fill"
         )
     }
 }
